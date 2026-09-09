@@ -211,7 +211,7 @@
         async function checkSession() {
             try {
                 const data = await fetch('/api/check').then(r => r.json());
-                if (data.logged_in) { hideLogin(); loadStats(); } else { showLogin(); }
+                if (data.logged_in) { hideLogin(); loadStats(); loadHealth(); } else { showLogin(); }
             } catch { showLogin(); }
         }
 
@@ -231,7 +231,7 @@
                 });
                 const data = await resp.json();
                 if (resp.ok && data.ok) {
-                    hideLogin(); loadStats();
+                    hideLogin(); loadStats(); loadHealth();
                 } else if (resp.status === 429) {
                     const sec = data.wait || 300;
                     const min = Math.ceil(sec / 60);
