@@ -6,6 +6,9 @@ on:
     paths:
       - 'Dockerfile'
       - 'docker-compose.yml'
+      - 'app.py'
+      - 'requirements.txt'
+      - 'templates/**'
       - '.github/workflows/docker-publish.yml'
   workflow_dispatch:
 
