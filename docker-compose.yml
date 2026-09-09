@@ -1,0 +1,9 @@
+services:
+  kms:
+    image: ywsj/ywsj-kms:latest
+    container_name: ywsj-kms
+    restart: always
+    ports:
+      - "1688:1688"
+    environment:
+      - TZ=Asia/Shanghai
