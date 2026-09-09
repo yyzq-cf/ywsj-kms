@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ywsj-kms - 账户设置</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #0f1117; --card: #1a1d27; --border: #2a2d3a;
+            --text: #e0e0e0; --text-dim: #888; --accent: #4f9eff;
+            --green: #4caf50; --orange: #ff9800; --red: #f44336; --radius: 12px;
+        }
+        [data-theme="light"] { --bg: #f5f5f5; --card: #fff; --border: #e0e0e0; --text: #333; --text-dim: #888; --accent: #1976d2; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+        .navbar { display: flex; justify-content: space-between; align-items: center; padding: 0 24px; height: 56px; background: var(--card); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; }
+        .nav-left { display: flex; align-items: center; gap: 12px; }
+        .logo { font-size: 18px; font-weight: 700; }
+        .version { font-size: 12px; color: var(--text-dim); background: var(--bg); padding: 2px 8px; border-radius: 6px; }
+        .nav-right { display: flex; gap: 16px; align-items: center; }
+        .nav-link { color: var(--text-dim); text-decoration: none; font-size: 14px; }
+        .nav-link:hover, .nav-link.active { color: var(--accent); }
+        .nav-user { font-size: 13px; color: var(--text-dim); }
+        .nav-logout { color: var(--red); cursor: pointer; font-size: 13px; background: none; border: none; }
+        .theme-btn { background: none; border: none; font-size: 18px; cursor: pointer; }
+        .container { max-width: 600px; margin: 0 auto; padding: 24px; }
+        .section { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; margin-bottom: 24px; }
+        .section-title { font-size: 16px; font-weight: 600; margin-bottom: 20px; }
+        .form-group { margin-bottom: 16px; }
+        .form-label { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 6px; }
+        .form-input { width: 100%; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; }
+        .form-input:focus { outline: none; border-color: var(--accent); }
+        .form-btn { padding: 10px 20px; background: var(--accent); color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; }
+        .form-btn:hover { opacity: 0.9; }
+        .form-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .msg { font-size: 13px; margin-top: 8px; display: none; }
+        .msg-ok { color: var(--green); }
+        .msg-err { color: var(--red); }
+        .cur-user { font-size: 14px; color: var(--text-dim); margin-bottom: 16px; }
+        .cur-user b { color: var(--accent); }
+        .footer { text-align: center; padding: 20px; color: var(--text-dim); font-size: 13px; }
+        .footer a { color: var(--accent); text-decoration: none; }
+        .login-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 200; backdrop-filter: blur(4px); }
+        .login-box { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 32px; width: 340px; }
+        .login-box h2 { text-align: center; margin-bottom: 24px; }
+        .login-box input { width: 100%; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; margin-bottom: 12px; }
+        .login-box button { width: 100%; padding: 10px; background: var(--accent); color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; }
+        .login-error { color: var(--red); font-size: 13px; text-align: center; margin-bottom: 12px; display: none; }
+        .login-warn { color: var(--orange); font-size: 13px; text-align: center; margin-bottom: 12px; display: none; }
+        .login-info { font-size: 12px; color: var(--text-dim); text-align: center; margin-top: 12px; }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-left">
+            <span class="logo">🔑 ywsj-kms</span>
+            <span class="version">v1.0</span>
+        </div>
+        <div class="nav-right">
+            <a href="/" class="nav-link">面板</a>
+            <a href="/logs" class="nav-link">日志</a>
+            <a href="/settings" class="nav-link active">设置</a>
+            <span class="nav-user" id="nav-user"></span>
+            <button class="nav-logout" id="nav-logout" style="display:none" onclick="doLogout()">退出</button>
+            <button id="theme-toggle" class="theme-btn">🌙</button>
+        </div>
+    </nav>
+
+    <div id="login-overlay" class="login-overlay">
+        <div class="login-box">
+            <h2>🔑 登录监控面板</h2>
+            <div id="login-error" class="login-error"></div>
+            <div id="login-warn" class="login-warn"></div>
+            <input type="text" id="login-user" placeholder="用户名" autocomplete="username">
+            <input type="password" id="login-pass" placeholder="密码" autocomplete="current-password">
+            <button id="login-btn" onclick="doLogin()">登录</button>
+            <div class="login-info">默认账号: admin / kms123456</div>
+        </div>
+    </div>
+
+    <main class="container" id="main-content" style="display:none">
+        <div class="section">
+            <div class="section-title">👤 当前账户</div>
+            <div class="cur-user">当前用户名: <b id="cur-username">-</b></div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">📝 修改用户名</div>
+            <div class="form-group">
+                <label class="form-label">当前密码（验证身份）</label>
+                <input type="password" class="form-input" id="username-current-pass" placeholder="输入当前密码">
+            </div>
+            <div class="form-group">
+                <label class="form-label">新用户名</label>
+                <input type="text" class="form-input" id="new-username" placeholder="至少3个字符">
+            </div>
+            <button class="form-btn" id="change-username-btn" onclick="changeUsername()">修改用户名</button>
+            <div class="msg msg-ok" id="username-ok"></div>
+            <div class="msg msg-err" id="username-err"></div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">🔐 修改密码</div>
+            <div class="form-group">
+                <label class="form-label">当前密码（验证身份）</label>
+                <input type="password" class="form-input" id="pass-current" placeholder="输入当前密码">
+            </div>
+            <div class="form-group">
+                <label class="form-label">新密码</label>
+                <input type="password" class="form-input" id="pass-new" placeholder="至少6位">
+            </div>
+            <div class="form-group">
+                <label class="form-label">确认新密码</label>
+                <input type="password" class="form-input" id="pass-confirm" placeholder="再次输入新密码">
+            </div>
+            <button class="form-btn" id="change-pass-btn" onclick="changePassword()">修改密码</button>
+            <div class="msg msg-ok" id="pass-ok"></div>
+            <div class="msg msg-err" id="pass-err"></div>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <a href="https://github.com/yyzq-cf/ywsj-kms" target="_blank">GitHub</a> ·
+        <a href="https://hub.docker.com/r/ywsj/ywsj-kms" target="_blank">Docker Hub</a>
+    </footer>
+
+    <script>
+        const themeBtn = document.getElementById('theme-toggle');
+        if (localStorage.getItem('kms-theme') === 'light') { document.documentElement.setAttribute('data-theme','light'); themeBtn.textContent = '☀️'; }
+        themeBtn.onclick = () => {
+            const cur = document.documentElement.getAttribute('data-theme');
+            if (cur === 'light') { document.documentElement.removeAttribute('data-theme'); themeBtn.textContent='🌙'; localStorage.setItem('kms-theme','dark'); }
+            else { document.documentElement.setAttribute('data-theme','light'); themeBtn.textContent='☀️'; localStorage.setItem('kms-theme','light'); }
+        };
+
+        function showLogin() { document.getElementById('login-overlay').style.display='flex'; document.getElementById('main-content').style.display='none'; document.getElementById('nav-logout').style.display='none'; }
+        function hideLogin() { document.getElementById('login-overlay').style.display='none'; document.getElementById('main-content').style.display='block'; document.getElementById('nav-logout').style.display='inline'; loadAccount(); }
+
+        async function checkSession() {
+            try {
+                const data = await fetch('/api/check').then(r => r.json());
+                if (data.logged_in) hideLogin(); else showLogin();
+            } catch { showLogin(); }
+        }
+
+        async function doLogin() {
+            const u = document.getElementById('login-user').value.trim();
+            const p = document.getElementById('login-pass').value;
+            const errEl = document.getElementById('login-error');
+            const warnEl = document.getElementById('login-warn');
+            const btn = document.getElementById('login-btn');
+            errEl.style.display='none'; warnEl.style.display='none';
+            btn.disabled=true; btn.textContent='登录中...';
+            try {
+                const resp = await fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u, password:p}) });
+                const data = await resp.json();
+                if (resp.ok && data.ok) hideLogin();
+                else if (resp.status === 429) { warnEl.textContent=data.msg||'封禁'; warnEl.style.display='block'; btn.disabled=true; btn.textContent='已封禁'; startCountdown(data.wait||300); }
+                else { errEl.textContent=data.msg||'错误'; errEl.style.display='block'; btn.disabled=false; btn.textContent='登录'; }
+            } catch { errEl.textContent='网络错误'; errEl.style.display='block'; btn.disabled=false; btn.textContent='登录'; }
+        }
+
+        let countdownTimer=null;
+        function startCountdown(sec) {
+            let r=sec; const btn=document.getElementById('login-btn');
+            clearInterval(countdownTimer);
+            countdownTimer=setInterval(()=>{ r--; if(r<=0){clearInterval(countdownTimer);btn.disabled=false;btn.textContent='登录';}else{btn.textContent=`等待 ${Math.floor(r/60)}:${String(r%60).padStart(2,'0')}`;} },1000);
+        }
+
+        async function doLogout() { await fetch('/api/logout',{method:'POST'}); showLogin(); }
+        document.getElementById('login-pass').addEventListener('keydown', e=>{if(e.key==='Enter')doLogin();});
+
+        async function loadAccount() {
+            try {
+                const resp = await fetch('/api/account');
+                if (resp.status === 401) { showLogin(); return; }
+                const data = await resp.json();
+                document.getElementById('cur-username').textContent = data.username;
+                document.getElementById('nav-user').textContent = '👤 ' + data.username;
+            } catch {}
+        }
+
+        function showMsg(elId, msg, isOk) {
+            const el = document.getElementById(elId);
+            el.textContent = msg;
+            el.className = 'msg ' + (isOk ? 'msg-ok' : 'msg-err');
+            el.style.display = 'block';
+            setTimeout(() => { el.style.display = 'none'; }, 4000);
+        }
+
+        async function changeUsername() {
+            const curPass = document.getElementById('username-current-pass').value;
+            const newUser = document.getElementById('new-username').value.trim();
+            const btn = document.getElementById('change-username-btn');
+            if (!curPass || !newUser) { showMsg('username-err', '请填写完整', false); return; }
+            if (newUser.length < 3) { showMsg('username-err', '用户名至少3个字符', false); return; }
+            btn.disabled = true; btn.textContent = '提交中...';
+            try {
+                const resp = await fetch('/api/change-username', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ current_password: curPass, new_username: newUser })
+                });
+                const data = await resp.json();
+                if (resp.ok && data.ok) {
+                    showMsg('username-ok', data.msg, true);
+                    document.getElementById('cur-username').textContent = data.username;
+                    document.getElementById('nav-user').textContent = '👤 ' + data.username;
+                    document.getElementById('username-current-pass').value = '';
+                    document.getElementById('new-username').value = '';
+                } else {
+                    showMsg('username-err', data.msg || '修改失败', false);
+                }
+            } catch { showMsg('username-err', '网络错误', false); }
+            btn.disabled = false; btn.textContent = '修改用户名';
+        }
+
+        async function changePassword() {
+            const curPass = document.getElementById('pass-current').value;
+            const newPass = document.getElementById('pass-new').value;
+            const confirmPass = document.getElementById('pass-confirm').value;
+            const btn = document.getElementById('change-pass-btn');
+            if (!curPass || !newPass || !confirmPass) { showMsg('pass-err', '请填写完整', false); return; }
+            if (newPass.length < 6) { showMsg('pass-err', '新密码至少6位', false); return; }
+            if (newPass !== confirmPass) { showMsg('pass-err', '两次输入的新密码不一致', false); return; }
+            btn.disabled = true; btn.textContent = '提交中...';
+            try {
+                const resp = await fetch('/api/change-password', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ current_password: curPass, new_password: newPass })
+                });
+                const data = await resp.json();
+                if (resp.ok && data.ok) {
+                    showMsg('pass-ok', data.msg, true);
+                    document.getElementById('pass-current').value = '';
+                    document.getElementById('pass-new').value = '';
+                    document.getElementById('pass-confirm').value = '';
+                } else {
+                    showMsg('pass-err', data.msg || '修改失败', false);
+                }
+            } catch { showMsg('pass-err', '网络错误', false); }
+            btn.disabled = false; btn.textContent = '修改密码';
+        }
+
+        checkSession();
+    </script>
+</body>
+</html>

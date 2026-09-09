@@ -339,6 +339,11 @@ def logs_page():
     return render_template('logs.html')
 
 
+@app.route('/settings')
+def settings_page():
+    return render_template('settings.html')
+
+
 @app.route('/api/login', methods=['POST'])
 def api_login():
     ip = get_client_ip()
@@ -484,6 +489,82 @@ def api_export():
     logs = conn.execute("SELECT * FROM activation_logs ORDER BY id DESC").fetchall()
     conn.close()
     return jsonify([dict(l) for l in logs])
+
+
+@app.route('/api/account', methods=['GET'])
+@login_required
+def api_account():
+    """Get current account info."""
+    return jsonify({'username': session.get('user', '')})
+
+
+@app.route('/api/change-password', methods=['POST'])
+@login_required
+def api_change_password():
+    """Change password. Requires current password verification."""
+    data = request.get_json() or {}
+    current_pass = data.get('current_password', '')
+    new_pass = data.get('new_password', '')
+
+    if not current_pass or not new_pass:
+        return jsonify({'ok': False, 'msg': '请填写当前密码和新密码'}), 400
+
+    if len(new_pass) < 6:
+        return jsonify({'ok': False, 'msg': '新密码至少6位'}), 400
+
+    username = session.get('user')
+    if not check_auth(username, current_pass):
+        return jsonify({'ok': False, 'msg': '当前密码错误'}), 403
+
+    conn = get_db()
+    conn.execute(
+        """UPDATE admin_users SET password_hash=?
+           WHERE username=?""",
+        (generate_password_hash(new_pass), username)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True, 'msg': '密码修改成功'})
+
+
+@app.route('/api/change-username', methods=['POST'])
+@login_required
+def api_change_username():
+    """Change username. Requires current password verification."""
+    data = request.get_json() or {}
+    current_pass = data.get('current_password', '')
+    new_user = data.get('new_username', '').strip()
+
+    if not current_pass or not new_user:
+        return jsonify({'ok': False, 'msg': '请填写当前密码和新用户名'}), 400
+
+    if len(new_user) < 3:
+        return jsonify({'ok': False, 'msg': '用户名至少3个字符'}), 400
+
+    username = session.get('user')
+    if not check_auth(username, current_pass):
+        return jsonify({'ok': False, 'msg': '当前密码错误'}), 403
+
+    conn = get_db()
+    # Check if new username already taken
+    existing = conn.execute(
+        "SELECT id FROM admin_users WHERE username=? AND username!=?",
+        (new_user, username)
+    ).fetchone()
+    if existing:
+        conn.close()
+        return jsonify({'ok': False, 'msg': '用户名已存在'}), 409
+
+    conn.execute(
+        "UPDATE admin_users SET username=? WHERE username=?",
+        (new_user, username)
+    )
+    conn.commit()
+    conn.close()
+
+    # Update session
+    session['user'] = new_user
+    return jsonify({'ok': True, 'msg': '用户名修改成功', 'username': new_user})
 
 
 if __name__ == '__main__':
