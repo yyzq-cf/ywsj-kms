@@ -79,7 +79,7 @@ def clear_attempts():
 APP_NAMES = {
     "55c92734-d682-4d71-983e-d6ec3f16059f": "Windows",
     "59a52881-a989-479d-af46-f275c6370663": "Office 2013+",
-    "0ff1ce15-a989-479d-af46-f275c6370663": "Office 2010",
+    "0ff1ce15-a989-479d-af46-f275c6370663": "Office 2010/2019/2021",
 }
 
 KMS_ID_NAMES = {
