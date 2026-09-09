@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ywsj-kms - 激活日志</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #0f1117; --card: #1a1d27; --border: #2a2d3a;
+            --text: #e0e0e0; --text-dim: #888; --accent: #4f9eff;
+            --green: #4caf50; --orange: #ff9800; --red: #f44336; --purple: #ab47bc; --radius: 12px;
+        }
+        [data-theme="light"] { --bg: #f5f5f5; --card: #fff; --border: #e0e0e0; --text: #333; --text-dim: #888; --accent: #1976d2; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+        .navbar { display: flex; justify-content: space-between; align-items: center; padding: 0 24px; height: 56px; background: var(--card); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; }
+        .nav-left { display: flex; align-items: center; gap: 12px; }
+        .logo { font-size: 18px; font-weight: 700; }
+        .version { font-size: 12px; color: var(--text-dim); background: var(--bg); padding: 2px 8px; border-radius: 6px; }
+        .nav-right { display: flex; gap: 16px; align-items: center; }
+        .nav-link { color: var(--text-dim); text-decoration: none; font-size: 14px; }
+        .nav-link:hover, .nav-link.active { color: var(--accent); }
+        .nav-user { font-size: 13px; color: var(--text-dim); }
+        .nav-logout { color: var(--red); cursor: pointer; font-size: 13px; background: none; border: none; }
+        .theme-btn { background: none; border: none; font-size: 18px; cursor: pointer; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+        .section { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+        .section-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+        .search-box { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+        .search-box input, .search-box select { padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; }
+        .search-box input { flex: 1; min-width: 200px; }
+        .search-btn { padding: 8px 16px; background: var(--accent); color: #fff; border: none; border-radius: 8px; cursor: pointer; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { text-align: left; padding: 10px 12px; color: var(--text-dim); font-weight: 500; border-bottom: 1px solid var(--border); white-space: nowrap; }
+        td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+        tr:hover td { background: var(--bg); }
+        .badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 12px; }
+        .badge-windows { background: rgba(79,158,255,0.15); color: var(--accent); }
+        .badge-office { background: rgba(171,71,188,0.15); color: var(--purple); }
+        .badge-unknown { background: rgba(136,136,136,0.15); color: var(--text-dim); }
+        .badge-active { background: rgba(76,175,80,0.15); color: var(--green); }
+        .badge-grace { background: rgba(255,152,0,0.15); color: var(--orange); }
+        .empty { text-align: center; padding: 40px; color: var(--text-dim); }
+        .loading { text-align: center; padding: 40px; color: var(--text-dim); }
+        .footer { text-align: center; padding: 20px; color: var(--text-dim); font-size: 13px; }
+        .footer a { color: var(--accent); text-decoration: none; }
+        .pagination { display: flex; gap: 8px; justify-content: center; margin-top: 16px; }
+        .pagination button { padding: 6px 14px; background: var(--card); border: 1px solid var(--border); border-radius: 6px; color: var(--text); cursor: pointer; font-size: 14px; }
+        .pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+        .pagination button.current { background: var(--accent); border-color: var(--accent); color: #fff; }
+        .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; z-index: 200; }
+        .modal-box { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 90%; max-width: 600px; max-height: 80vh; overflow-y: auto; }
+        .modal-box h3 { margin-bottom: 16px; }
+        .modal-box pre { background: var(--bg); padding: 12px; border-radius: 8px; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+        .modal-close { float: right; cursor: pointer; font-size: 20px; color: var(--text-dim); }
+        .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; margin-bottom: 16px; }
+        .detail-item { display: flex; gap: 8px; font-size: 13px; }
+        .detail-label { color: var(--text-dim); min-width: 100px; }
+        .login-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 200; backdrop-filter: blur(4px); }
+        .login-box { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 32px; width: 340px; }
+        .login-box h2 { text-align: center; margin-bottom: 24px; }
+        .login-box input { width: 100%; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; margin-bottom: 12px; }
+        .login-box button { width: 100%; padding: 10px; background: var(--accent); color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; }
+        .login-error { color: var(--red); font-size: 13px; text-align: center; margin-bottom: 12px; display: none; }
+        .login-warn { color: var(--orange); font-size: 13px; text-align: center; margin-bottom: 12px; display: none; }
+        .login-info { font-size: 12px; color: var(--text-dim); text-align: center; margin-top: 12px; }
+        @media (max-width: 768px) { .container { padding: 12px; } table { font-size: 11px; } th, td { padding: 6px; } .detail-grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-left">
+            <span class="logo">🔑 ywsj-kms</span>
+            <span class="version">v1.0</span>
+        </div>
+        <div class="nav-right">
+            <a href="/" class="nav-link">面板</a>
+            <a href="/logs" class="nav-link active">日志</a>
+            <span class="nav-user" id="nav-user"></span>
+            <button class="nav-logout" id="nav-logout" style="display:none" onclick="doLogout()">退出</button>
+            <button id="theme-toggle" class="theme-btn">🌙</button>
+        </div>
+    </nav>
+
+    <div id="login-overlay" class="login-overlay">
+        <div class="login-box">
+            <h2>🔑 登录监控面板</h2>
+            <div id="login-error" class="login-error"></div>
+            <div id="login-warn" class="login-warn"></div>
+            <input type="text" id="login-user" placeholder="用户名" autocomplete="username">
+            <input type="password" id="login-pass" placeholder="密码" autocomplete="current-password">
+            <button id="login-btn" onclick="doLogin()">登录</button>
+            <div class="login-info">默认账号: admin / kms123456</div>
+        </div>
+    </div>
+
+    <main class="container" id="main-content" style="display:none">
+        <div class="section">
+            <div class="section-title">📋 激活日志</div>
+            <div class="search-box">
+                <input type="text" id="search-input" placeholder="搜索 IP、工作站名、机器ID..." onkeydown="if(event.key==='Enter')loadLogs(1)">
+                <select id="app-filter" onchange="loadLogs(1)">
+                    <option value="">全部产品</option>
+                    <option value="Windows">Windows</option>
+                    <option value="Office 2013+">Office 2013+</option>
+                    <option value="Office 2010">Office 2010</option>
+                    <option value="Unknown">未知</option>
+                </select>
+                <button class="search-btn" onclick="loadLogs(1)">搜索</button>
+            </div>
+            <table>
+                <thead><tr><th>时间</th><th>IP</th><th>工作站</th><th>产品</th><th>KMS产品</th><th>许可状态</th><th>操作</th></tr></thead>
+                <tbody id="logs-table"><tr><td colspan="7" class="loading">加载中...</td></tr></tbody>
+            </table>
+            <div class="pagination" id="pagination"></div>
+        </div>
+    </main>
+
+    <div class="modal" id="detail-modal">
+        <div class="modal-box">
+            <span class="modal-close" onclick="closeModal()">&times;</span>
+            <h3>激活详情</h3>
+            <div class="detail-grid" id="detail-grid"></div>
+            <h4 style="margin: 16px 0 8px; font-size:14px; color:var(--text-dim);">原始日志</h4>
+            <pre id="raw-log"></pre>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <a href="https://github.com/yyzq-cf/ywsj-kms" target="_blank">GitHub</a> ·
+        <a href="https://hub.docker.com/r/ywsj/ywsj-kms" target="_blank">Docker Hub</a>
+    </footer>
+
+    <script>
+        const themeBtn = document.getElementById('theme-toggle');
+        if (localStorage.getItem('kms-theme') === 'light') { document.documentElement.setAttribute('data-theme','light'); themeBtn.textContent = '☀️'; }
+        themeBtn.onclick = () => {
+            const cur = document.documentElement.getAttribute('data-theme');
+            if (cur === 'light') { document.documentElement.removeAttribute('data-theme'); themeBtn.textContent='🌙'; localStorage.setItem('kms-theme','dark'); }
+            else { document.documentElement.setAttribute('data-theme','light'); themeBtn.textContent='☀️'; localStorage.setItem('kms-theme','light'); }
+        };
+
+        async function api(path) {
+            const resp = await fetch(path);
+            if (resp.status === 401) { showLogin(); throw new Error('auth'); }
+            return resp.json();
+        }
+
+        function showLogin() { document.getElementById('login-overlay').style.display = 'flex'; document.getElementById('main-content').style.display = 'none'; document.getElementById('nav-logout').style.display = 'none'; }
+        function hideLogin() { document.getElementById('login-overlay').style.display = 'none'; document.getElementById('main-content').style.display = 'block'; document.getElementById('nav-logout').style.display = 'inline'; document.getElementById('nav-user').textContent = '👤 admin'; }
+
+        async function checkSession() {
+            try {
+                const data = await fetch('/api/check').then(r => r.json());
+                if (data.logged_in) { hideLogin(); loadLogs(1); } else { showLogin(); }
+            } catch { showLogin(); }
+        }
+
+        async function doLogin() {
+            const u = document.getElementById('login-user').value.trim();
+            const p = document.getElementById('login-pass').value;
+            const errEl = document.getElementById('login-error');
+            const warnEl = document.getElementById('login-warn');
+            const btn = document.getElementById('login-btn');
+            errEl.style.display = 'none'; warnEl.style.display = 'none';
+            btn.disabled = true; btn.textContent = '登录中...';
+            try {
+                const resp = await fetch('/api/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({username: u, password: p}) });
+                const data = await resp.json();
+                if (resp.ok && data.ok) { hideLogin(); loadLogs(1); }
+                else if (resp.status === 429) { warnEl.textContent = data.msg || 'IP已封禁'; warnEl.style.display = 'block'; btn.disabled = true; btn.textContent = '已封禁'; startCountdown(data.wait||300); }
+                else { errEl.textContent = data.msg || '错误'; errEl.style.display = 'block'; btn.disabled = false; btn.textContent = '登录'; }
+            } catch { errEl.textContent = '网络错误'; errEl.style.display = 'block'; btn.disabled = false; btn.textContent = '登录'; }
+        }
+
+        let countdownTimer = null;
+        function startCountdown(sec) {
+            let r = sec; const btn = document.getElementById('login-btn');
+            clearInterval(countdownTimer);
+            countdownTimer = setInterval(() => { r--; if (r<=0) { clearInterval(countdownTimer); btn.disabled=false; btn.textContent='登录'; } else { btn.textContent = `等待 ${Math.floor(r/60)}:${String(r%60).padStart(2,'0')}`; } }, 1000);
+        }
+
+        async function doLogout() { await fetch('/api/logout', {method:'POST'}); showLogin(); }
+        document.getElementById('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+        function badge(name) { const cls = name && name.includes('Windows') ? 'windows' : name && name.includes('Office') ? 'office' : 'unknown'; return `<span class="badge badge-${cls}">${name || 'Unknown'}</span>`; }
+        function statusBadge(s) { if (s === 'Licensed') return `<span class="badge badge-active">已授权</span>`; if (s && s.includes('grace')) return `<span class="badge badge-grace">${s}</span>`; return `<span class="badge badge-unknown">${s || '未知'}</span>`; }
+        function fmtTime(ts) { return ts ? ts.substring(5,16).replace('T',' ') : '-'; }
+
+        let allLogs = [];
+        async function loadLogs(page) {
+            const el = document.getElementById('logs-table');
+            el.innerHTML = '<tr><td colspan="7" class="loading">加载中...</td></tr>';
+            try {
+                const search = document.getElementById('search-input').value;
+                const appF = document.getElementById('app-filter').value;
+                const data = await api(`/api/logs?page=${page}&search=${encodeURIComponent(search)}&app=${encodeURIComponent(appF)}`);
+                allLogs = data.logs;
+                el.innerHTML = data.logs.length === 0 ? '<tr><td colspan="7" class="empty">无记录</td></tr>' :
+                    data.logs.map(l => `<tr><td>${fmtTime(l.timestamp)}</td><td>${l.client_ip||'-'}</td><td>${l.workstation_name||'-'}</td><td>${badge(l.application_name)}</td><td>${l.kms_id_name||'-'}</td><td>${statusBadge(l.license_status)}</td><td><a href="#" onclick="showDetail(${l.id});return false" style="color:var(--accent)">详情</a></td></tr>`).join('');
+                const pg = document.getElementById('pagination');
+                let h = '';
+                if (page > 1) h += `<button onclick="loadLogs(${page-1})">上一页</button>`;
+                const s = Math.max(1,page-2), e = Math.min(data.pages,page+2);
+                for (let i=s; i<=e; i++) h += `<button class="${i===page?'current':''}" onclick="loadLogs(${i})">${i}</button>`;
+                if (page < data.pages) h += `<button onclick="loadLogs(${page+1})">下一页</button>`;
+                pg.innerHTML = h;
+            } catch(e) { if (e.message !== 'auth') el.innerHTML = '<tr><td colspan="7" class="empty">加载失败</td></tr>'; }
+        }
+
+        function showDetail(id) {
+            const log = allLogs.find(l => l.id === id);
+            if (!log) return;
+            const fields = [['时间',log.timestamp],['IP地址',log.client_ip],['端口',log.client_port],['协议版本',log.protocol_version],['工作站名',log.workstation_name],['客户端机器ID',log.client_machine_id],['应用类型',log.application_name],['KMS产品',log.kms_id_name],['SKU ID',log.sku_id],['KMS ID',log.kms_id],['许可状态',log.license_status],['剩余时间',log.remaining_time_minutes?log.remaining_time_minutes+'分钟':'-'],['虚拟机',log.is_virtual_machine],['最小客户端数',log.n_count_policy],['ePID',log.response_epid],['当前客户端数',log.active_clients],['续期间隔',log.renewal_interval?log.renewal_interval+'分钟':'-'],['激活间隔',log.activation_interval?log.activation_interval+'分钟':'-'],['请求时间(UTC)',log.request_timestamp_utc]];
+            document.getElementById('detail-grid').innerHTML = fields.map(([k,v]) => `<div class="detail-item"><span class="detail-label">${k}</span><span>${v||'-'}</span></div>`).join('');
+            document.getElementById('raw-log').textContent = log.raw_log || '';
+            document.getElementById('detail-modal').style.display = 'flex';
+        }
+        function closeModal() { document.getElementById('detail-modal').style.display = 'none'; }
+
+        checkSession();
+    </script>
+</body>
+</html>

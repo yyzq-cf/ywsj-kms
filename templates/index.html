@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ywsj-kms - KMS激活监控面板</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #0f1117; --card: #1a1d27; --border: #2a2d3a;
+            --text: #e0e0e0; --text-dim: #888; --accent: #4f9eff;
+            --accent-dim: #2a6ec7; --green: #4caf50; --orange: #ff9800;
+            --red: #f44336; --purple: #ab47bc; --radius: 12px;
+        }
+        [data-theme="light"] {
+            --bg: #f5f5f5; --card: #ffffff; --border: #e0e0e0;
+            --text: #333; --text-dim: #888; --accent: #1976d2;
+            --accent-dim: #bbdefb;
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; transition: background 0.3s; }
+        .navbar { display: flex; justify-content: space-between; align-items: center; padding: 0 24px; height: 56px; background: var(--card); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; }
+        .nav-left { display: flex; align-items: center; gap: 12px; }
+        .logo { font-size: 18px; font-weight: 700; }
+        .version { font-size: 12px; color: var(--text-dim); background: var(--bg); padding: 2px 8px; border-radius: 6px; }
+        .nav-right { display: flex; align-items: center; gap: 16px; }
+        .nav-link { color: var(--text-dim); text-decoration: none; font-size: 14px; transition: color 0.2s; }
+        .nav-link:hover, .nav-link.active { color: var(--accent); }
+        .nav-user { font-size: 13px; color: var(--text-dim); }
+        .nav-logout { color: var(--red); cursor: pointer; font-size: 13px; background: none; border: none; }
+        .theme-btn { background: none; border: none; font-size: 18px; cursor: pointer; padding: 4px 8px; border-radius: 6px; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; text-align: center; transition: transform 0.2s; }
+        .stat-card:hover { transform: translateY(-2px); }
+        .stat-value { font-size: 32px; font-weight: 700; color: var(--accent); }
+        .stat-label { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
+        .section { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 24px; }
+        .section-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th { text-align: left; padding: 10px 12px; color: var(--text-dim); font-weight: 500; border-bottom: 1px solid var(--border); }
+        td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+        tr:hover td { background: var(--bg); }
+        .badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+        .badge-windows { background: rgba(79,158,255,0.15); color: var(--accent); }
+        .badge-office { background: rgba(171,71,188,0.15); color: var(--purple); }
+        .badge-unknown { background: rgba(136,136,136,0.15); color: var(--text-dim); }
+        .badge-active { background: rgba(76,175,80,0.15); color: var(--green); }
+        .badge-grace { background: rgba(255,152,0,0.15); color: var(--orange); }
+        .empty { text-align: center; padding: 40px; color: var(--text-dim); }
+        .loading { text-align: center; padding: 40px; color: var(--text-dim); }
+        .login-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 200; backdrop-filter: blur(4px); }
+        .login-box { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 32px; width: 340px; }
+        .login-box h2 { text-align: center; margin-bottom: 24px; }
+        .login-box input { width: 100%; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; margin-bottom: 12px; }
+        .login-box input:focus { outline: none; border-color: var(--accent); }
+        .login-box button { width: 100%; padding: 10px; background: var(--accent); color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; transition: opacity 0.2s; }
+        .login-box button:hover { opacity: 0.9; }
+        .login-box button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .login-error { color: var(--red); font-size: 13px; text-align: center; margin-bottom: 12px; display: none; }
+        .login-warn { color: var(--orange); font-size: 13px; text-align: center; margin-bottom: 12px; display: none; }
+        .login-info { font-size: 12px; color: var(--text-dim); text-align: center; margin-top: 12px; }
+        .chart-bar { display: flex; align-items: flex-end; gap: 4px; height: 120px; padding-top: 20px; }
+        .bar { flex: 1; background: var(--accent-dim); border-radius: 4px 4px 0 0; min-height: 4px; position: relative; cursor: pointer; transition: background 0.2s; }
+        .bar:hover { background: var(--accent); }
+        .bar-label { position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%); font-size: 10px; color: var(--text-dim); }
+        .bar-count { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 10px; color: var(--text); }
+        .footer { text-align: center; padding: 20px; color: var(--text-dim); font-size: 13px; }
+        .footer a { color: var(--accent); text-decoration: none; }
+        @media (max-width: 768px) {
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .container { padding: 12px; }
+            table { font-size: 12px; }
+            th, td { padding: 6px 8px; }
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-left">
+            <span class="logo">🔑 ywsj-kms</span>
+            <span class="version">v1.0</span>
+        </div>
+        <div class="nav-right">
+            <a href="/" class="nav-link active">面板</a>
+            <a href="/logs" class="nav-link">日志</a>
+            <span class="nav-user" id="nav-user"></span>
+            <button class="nav-logout" id="nav-logout" style="display:none" onclick="doLogout()">退出</button>
+            <button id="theme-toggle" class="theme-btn">🌙</button>
+        </div>
+    </nav>
+
+    <div id="login-overlay" class="login-overlay">
+        <div class="login-box">
+            <h2>🔑 登录监控面板</h2>
+            <div id="login-error" class="login-error"></div>
+            <div id="login-warn" class="login-warn"></div>
+            <input type="text" id="login-user" placeholder="用户名" autocomplete="username">
+            <input type="password" id="login-pass" placeholder="密码" autocomplete="current-password">
+            <button id="login-btn" onclick="doLogin()">登录</button>
+            <div class="login-info">默认账号: admin / kms123456</div>
+        </div>
+    </div>
+
+    <main class="container" id="main-content" style="display:none">
+        <div class="stats-grid">
+            <div class="stat-card"><div class="stat-value" id="stat-total">-</div><div class="stat-label">总激活次数</div></div>
+            <div class="stat-card"><div class="stat-value" id="stat-ips">-</div><div class="stat-label">不同IP数</div></div>
+            <div class="stat-card"><div class="stat-value" id="stat-machines">-</div><div class="stat-label">不同机器数</div></div>
+            <div class="stat-card"><div class="stat-value" id="stat-workstations">-</div><div class="stat-label">工作站数</div></div>
+            <div class="stat-card"><div class="stat-value" id="stat-today">-</div><div class="stat-label">今日激活</div></div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">📊 按产品类型</div>
+            <div id="by-app"><div class="loading">加载中...</div></div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">🕐 24小时活动趋势</div>
+            <div class="chart-bar" id="chart-24h"></div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">💻 活跃工作站</div>
+            <table>
+                <thead><tr><th>工作站名</th><th>IP地址</th><th>激活次数</th><th>最后激活时间</th></tr></thead>
+                <tbody id="workstations-table"><tr><td colspan="4" class="loading">加载中...</td></tr></tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <div class="section-title">⚡ 最近激活</div>
+            <table>
+                <thead><tr><th>时间</th><th>IP</th><th>工作站</th><th>产品</th><th>状态</th></tr></thead>
+                <tbody id="latest-table"><tr><td colspan="5" class="loading">加载中...</td></tr></tbody>
+            </table>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <a href="https://github.com/yyzq-cf/ywsj-kms" target="_blank">GitHub</a> ·
+        <a href="https://hub.docker.com/r/ywsj/ywsj-kms" target="_blank">Docker Hub</a>
+    </footer>
+
+    <script>
+        // Theme
+        const themeBtn = document.getElementById('theme-toggle');
+        if (localStorage.getItem('kms-theme') === 'light') { document.documentElement.setAttribute('data-theme','light'); themeBtn.textContent = '☀️'; }
+        themeBtn.onclick = () => {
+            const cur = document.documentElement.getAttribute('data-theme');
+            if (cur === 'light') { document.documentElement.removeAttribute('data-theme'); themeBtn.textContent='🌙'; localStorage.setItem('kms-theme','dark'); }
+            else { document.documentElement.setAttribute('data-theme','light'); themeBtn.textContent='☀️'; localStorage.setItem('kms-theme','light'); }
+        };
+
+        // API helper
+        async function api(path, opts={}) {
+            const resp = await fetch(path, opts);
+            if (resp.status === 401) { showLogin(); throw new Error('auth'); }
+            return resp.json();
+        }
+
+        // Auth
+        function showLogin() {
+            document.getElementById('login-overlay').style.display = 'flex';
+            document.getElementById('main-content').style.display = 'none';
+            document.getElementById('nav-logout').style.display = 'none';
+            document.getElementById('nav-user').textContent = '';
+        }
+        function hideLogin() {
+            document.getElementById('login-overlay').style.display = 'none';
+            document.getElementById('main-content').style.display = 'block';
+            document.getElementById('nav-logout').style.display = 'inline';
+            document.getElementById('nav-user').textContent = '👤 admin';
+        }
+
+        async function checkSession() {
+            try {
+                const data = await fetch('/api/check').then(r => r.json());
+                if (data.logged_in) { hideLogin(); loadStats(); } else { showLogin(); }
+            } catch { showLogin(); }
+        }
+
+        async function doLogin() {
+            const u = document.getElementById('login-user').value.trim();
+            const p = document.getElementById('login-pass').value;
+            const errEl = document.getElementById('login-error');
+            const warnEl = document.getElementById('login-warn');
+            const btn = document.getElementById('login-btn');
+            errEl.style.display = 'none'; warnEl.style.display = 'none';
+            btn.disabled = true; btn.textContent = '登录中...';
+
+            try {
+                const resp = await fetch('/api/login', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username: u, password: p})
+                });
+                const data = await resp.json();
+                if (resp.ok && data.ok) {
+                    hideLogin(); loadStats();
+                } else if (resp.status === 429) {
+                    const sec = data.wait || 300;
+                    const min = Math.ceil(sec / 60);
+                    warnEl.textContent = `⛔ ${data.msg || 'IP已封禁'} (${min}分钟)`;
+                    warnEl.style.display = 'block';
+                    btn.disabled = true; btn.textContent = '已封禁';
+                    startCountdown(sec);
+                } else {
+                    errEl.textContent = data.msg || '用户名或密码错误';
+                    errEl.style.display = 'block';
+                    btn.disabled = false; btn.textContent = '登录';
+                }
+            } catch {
+                errEl.textContent = '网络错误，请重试';
+                errEl.style.display = 'block';
+                btn.disabled = false; btn.textContent = '登录';
+            }
+        }
+
+        let countdownTimer = null;
+        function startCountdown(sec) {
+            let remain = sec;
+            const btn = document.getElementById('login-btn');
+            clearInterval(countdownTimer);
+            countdownTimer = setInterval(() => {
+                remain--;
+                if (remain <= 0) { clearInterval(countdownTimer); btn.disabled = false; btn.textContent = '登录'; }
+                else { btn.textContent = `等待 ${Math.floor(remain/60)}:${String(remain%60).padStart(2,'0')}`; }
+            }, 1000);
+        }
+
+        async function doLogout() {
+            await fetch('/api/logout', {method: 'POST'});
+            showLogin();
+        }
+
+        document.getElementById('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+        // Stats
+        function badge(name) {
+            const cls = name && name.includes('Windows') ? 'windows' : name && name.includes('Office') ? 'office' : 'unknown';
+            return `<span class="badge badge-${cls}">${name || 'Unknown'}</span>`;
+        }
+        function statusBadge(s) {
+            if (s === 'Licensed') return `<span class="badge badge-active">已授权</span>`;
+            if (s && s.includes('grace')) return `<span class="badge badge-grace">${s}</span>`;
+            return `<span class="badge badge-unknown">${s || '未知'}</span>`;
+        }
+        function fmtTime(ts) { return ts ? ts.substring(5, 16).replace('T',' ') : '-'; }
+
+        async function loadStats() {
+            try {
+                const data = await api('/api/stats');
+                document.getElementById('stat-total').textContent = data.total;
+                document.getElementById('stat-ips').textContent = data.unique_ips;
+                document.getElementById('stat-machines').textContent = data.unique_machines;
+                document.getElementById('stat-workstations').textContent = data.unique_workstations;
+                document.getElementById('stat-today').textContent = data.today;
+
+                const appEl = document.getElementById('by-app');
+                appEl.innerHTML = data.by_app.length === 0 ? '<div class="empty">暂无数据</div>' :
+                    '<table><thead><tr><th>产品</th><th>激活次数</th><th>占比</th></tr></thead><tbody>' +
+                    data.by_app.map(r => { const pct = (r.count/data.total*100).toFixed(1); return `<tr><td>${badge(r.application_name)}</td><td>${r.count}</td><td>${pct}%</td></tr>`; }).join('') +
+                    '</tbody></table>';
+
+                const chartEl = document.getElementById('chart-24h');
+                chartEl.innerHTML = data.recent_24h.length === 0 ? '<div class="empty" style="width:100%">暂无数据</div>' :
+                    data.recent_24h.map(r => { const h = (r.count/Math.max(...data.recent_24h.map(x=>x.count))*100); return `<div class="bar" style="height:${h}%" title="${r.hour}: ${r.count}次"><span class="bar-count">${r.count}</span><span class="bar-label">${r.hour}</span></div>`; }).join('');
+
+                const wsEl = document.getElementById('workstations-table');
+                wsEl.innerHTML = data.top_workstations.length === 0 ? '<tr><td colspan="4" class="empty">暂无数据</td></tr>' :
+                    data.top_workstations.map(r => `<tr><td>${r.workstation_name}</td><td>${r.client_ip}</td><td>${r.count}</td><td>${fmtTime(r.last_seen)}</td></tr>`).join('');
+
+                const latEl = document.getElementById('latest-table');
+                latEl.innerHTML = !data.latest ? '<tr><td colspan="5" class="empty">暂无激活记录</td></tr>' :
+                    `<tr><td>${fmtTime(data.latest.timestamp)}</td><td>${data.latest.client_ip||'-'}</td><td>${data.latest.workstation_name||'-'}</td><td>${badge(data.latest.application_name)}</td><td>${statusBadge(data.latest.license_status)}</td></tr>`;
+            } catch(e) { if (e.message !== 'auth') console.error(e); }
+        }
+
+        checkSession();
+        setInterval(() => { if (document.getElementById('main-content').style.display !== 'none') loadStats(); }, 15000);
+    </script>
+</body>
+</html>
