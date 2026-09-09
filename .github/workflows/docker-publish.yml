@@ -36,4 +36,3 @@ jobs:
           push: true
           tags: |
             ywsj/ywsj-kms:latest
-            ywsj/ywsj-kms:${{ github.sha }}
