@@ -418,14 +418,19 @@ def check_kms_health():
     except Exception:
         health['kms_process'] = False
 
-    # 2. Check port 1688 listening (Python socket)
+    # 2. Check port 1688 via /proc/net/tcp (no actual connection to avoid log noise)
     try:
-        import socket
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(2)
-        result = s.connect_ex(('127.0.0.1', 1688))
-        s.close()
-        health['kms_port'] = (result == 0)
+        # Port 1688 = 0x690 in hex
+        target_port = format(1688, '04X')
+        with open('/proc/net/tcp') as tf:
+            for line in tf:
+                parts = line.split()
+                if len(parts) >= 4:
+                    local = parts[1]  # 00000000:0690
+                    state = parts[3]  # 0A = LISTEN
+                    if local.endswith(f':{target_port}') and state == '0A':
+                        health['kms_port'] = True
+                        break
     except Exception:
         health['kms_port'] = False
 
