@@ -29,6 +29,19 @@
         .nav-logout { color: var(--red); cursor: pointer; font-size: 13px; background: none; border: none; }
         .theme-btn { background: none; border: none; font-size: 18px; cursor: pointer; padding: 4px 8px; border-radius: 6px; }
         .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+        .health-bar { display: flex; align-items: center; gap: 16px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 24px; flex-wrap: wrap; }
+        .health-status { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 600; }
+        .health-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+        .health-dot.running { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 2s infinite; }
+        .health-dot.degraded { background: var(--orange); box-shadow: 0 0 8px var(--orange); }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .health-items { display: flex; gap: 20px; flex-wrap: wrap; }
+        .health-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-dim); }
+        .health-item b { color: var(--text); }
+        .health-ok { color: var(--green); }
+        .health-fail { color: var(--red); }
+
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
         .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; text-align: center; transition: transform 0.2s; }
         .stat-card:hover { transform: translateY(-2px); }
@@ -67,7 +80,20 @@
         .footer { text-align: center; padding: 20px; color: var(--text-dim); font-size: 13px; }
         .footer a { color: var(--accent); text-decoration: none; }
         @media (max-width: 768px) {
-            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    
+        .health-bar { display: flex; align-items: center; gap: 16px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 24px; flex-wrap: wrap; }
+        .health-status { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 600; }
+        .health-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+        .health-dot.running { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 2s infinite; }
+        .health-dot.degraded { background: var(--orange); box-shadow: 0 0 8px var(--orange); }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .health-items { display: flex; gap: 20px; flex-wrap: wrap; }
+        .health-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-dim); }
+        .health-item b { color: var(--text); }
+        .health-ok { color: var(--green); }
+        .health-fail { color: var(--red); }
+
+        .stats-grid { grid-template-columns: repeat(2, 1fr); }
             .container { padding: 12px; }
             table { font-size: 12px; }
             th, td { padding: 6px 8px; }
@@ -103,6 +129,14 @@
     </div>
 
     <main class="container" id="main-content" style="display:none">
+        <div class="health-bar" id="health-bar">
+            <div class="health-status">
+                <span class="health-dot" id="health-dot">-</span>
+                <span id="health-text">检测中...</span>
+            </div>
+            <div class="health-items" id="health-items"></div>
+        </div>
+
         <div class="stats-grid">
             <div class="stat-card"><div class="stat-value" id="stat-total">-</div><div class="stat-label">总激活次数</div></div>
             <div class="stat-card"><div class="stat-value" id="stat-ips">-</div><div class="stat-label">不同IP数</div></div>
@@ -277,8 +311,41 @@
             } catch(e) { if (e.message !== 'auth') console.error(e); }
         }
 
+
+        async function loadHealth() {
+            try {
+                const data = await api('/api/health');
+                const dot = document.getElementById('health-dot');
+                const text = document.getElementById('health-text');
+                const items = document.getElementById('health-items');
+
+                if (data.status === 'running') {
+                    dot.className = 'health-dot running';
+                    text.textContent = '服务运行中';
+                    text.style.color = 'var(--green)';
+                } else {
+                    dot.className = 'health-dot degraded';
+                    text.textContent = '服务异常';
+                    text.style.color = 'var(--orange)';
+                }
+
+                const fmtSize = (b) => b > 1048576 ? (b/1048576).toFixed(1)+'MB' : b > 1024 ? (b/1024).toFixed(0)+'KB' : b+'B';
+                items.innerHTML = [
+                    ['KMS进程', data.kms_process, data.kms_process ? '运行中' : '未运行'],
+                    ['端口1688', data.kms_port, data.kms_port ? '监听中' : '未监听'],
+                    ['数据库', data.database, data.database ? data.db_records+'条记录' : '连接失败'],
+                    ['日志文件', data.log_file, data.log_file ? fmtSize(data.log_size) : '无'],
+                    ['运行时长', null, data.uptime],
+                ].map(([label, ok, val]) => {
+                    const cls = ok === null ? '' : ok ? 'health-ok' : 'health-fail';
+                    const icon = ok === null ? '' : ok ? '✓' : '✗';
+                    return `<span class="health-item">${label}: <span class="${cls}">${icon} ${val}</span></span>`;
+                }).join('');
+            } catch(e) { if (e.message !== 'auth') console.error(e); }
+        }
+
         checkSession();
-        setInterval(() => { if (document.getElementById('main-content').style.display !== 'none') loadStats(); }, 15000);
+        setInterval(() => { if (document.getElementById('main-content').style.display !== 'none') { loadStats(); loadHealth(); } }, 15000);
     </script>
 </body>
 </html>

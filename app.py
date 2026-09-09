@@ -395,6 +395,100 @@ def api_check():
     return jsonify({'logged_in': bool(session.get('user'))})
 
 
+def check_kms_health():
+    """Check KMS service health: process, port, DB, log."""
+    health = {
+        'kms_process': False,
+        'kms_port': False,
+        'database': False,
+        'log_file': False,
+        'log_size': 0,
+        'uptime': '-',
+        'db_records': 0,
+    }
+
+    # 1. Check vlmcsd process
+    try:
+        result = subprocess.run(['pgrep', '-x', 'vlmcsd'], capture_output=True, timeout=3)
+        health['kms_process'] = result.returncode == 0
+    except Exception:
+        health['kms_process'] = False
+
+    # 2. Check port 1688 listening (Python socket)
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(2)
+        result = s.connect_ex(('127.0.0.1', 1688))
+        s.close()
+        health['kms_port'] = (result == 0)
+    except Exception:
+        health['kms_port'] = False
+
+    # 3. Check database
+    try:
+        conn = get_db()
+        health['database'] = True
+        health['db_records'] = conn.execute(
+            "SELECT COUNT(*) as c FROM activation_logs"
+        ).fetchone()['c']
+        conn.close()
+    except Exception:
+        health['database'] = False
+
+    # 4. Check log file
+    try:
+        if os.path.exists(LOG_PATH):
+            health['log_file'] = True
+            health['log_size'] = os.path.getsize(LOG_PATH)
+    except Exception:
+        pass
+
+    # 5. Calculate uptime from vlmcsd process
+    try:
+        pid_result = subprocess.run(
+            ['pgrep', '-x', 'vlmcsd'], capture_output=True, timeout=3, text=True
+        )
+        if pid_result.returncode == 0:
+            pid = pid_result.stdout.strip().split('\n')[0]
+            # Read /proc/<pid>/stat for start time (field 22 = starttime in clock ticks)
+            with open(f'/proc/{pid}/stat') as sf:
+                stat_parts = sf.read().split()
+                starttime_ticks = int(stat_parts[21])
+            # Get system clock tick rate and boot time
+            ticks_per_sec = os.sysconf(os.sysconf_names['SC_CLK_TCK'])
+            with open('/proc/uptime') as uf:
+                system_uptime = float(uf.read().split()[0])
+            # Process uptime = system_uptime - (starttime_ticks / ticks_per_sec)
+            proc_start = starttime_ticks / ticks_per_sec
+            proc_uptime = int(system_uptime - proc_start)
+            days = proc_uptime // 86400
+            hours = (proc_uptime % 86400) // 3600
+            mins = (proc_uptime % 3600) // 60
+            if days > 0:
+                health['uptime'] = f"{days}天{hours}时{mins}分"
+            elif hours > 0:
+                health['uptime'] = f"{hours}时{mins}分"
+            else:
+                health['uptime'] = f"{mins}分"
+    except Exception:
+        pass
+
+    # Overall status
+    health['status'] = 'running' if (
+        health['kms_process'] and health['kms_port'] and health['database']
+    ) else 'degraded'
+
+    return health
+
+
+@app.route('/api/health')
+@login_required
+def api_health():
+    """Service health check."""
+    return jsonify(check_kms_health())
+
+
 @app.route('/api/stats')
 @login_required
 def api_stats():
