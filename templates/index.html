@@ -211,7 +211,11 @@
         async function checkSession() {
             try {
                 const data = await fetch('/api/check').then(r => r.json());
-                if (data.logged_in) { hideLogin(); loadStats(); loadHealth(); } else { showLogin(); }
+                if (data.logged_in) {
+                    hideLogin();
+                    if (data.health) renderHealth(data.health);
+                    loadStats();
+                } else { showLogin(); }
             } catch { showLogin(); }
         }
 
@@ -231,7 +235,7 @@
                 });
                 const data = await resp.json();
                 if (resp.ok && data.ok) {
-                    hideLogin(); loadStats(); loadHealth();
+                    hideLogin(); loadStats(); refreshHealth();
                 } else if (resp.status === 429) {
                     const sec = data.wait || 300;
                     const min = Math.ceil(sec / 60);
@@ -312,40 +316,44 @@
         }
 
 
-        async function loadHealth() {
+        function renderHealth(data) {
+            const dot = document.getElementById('health-dot');
+            const text = document.getElementById('health-text');
+            const items = document.getElementById('health-items');
+
+            if (data.status === 'running') {
+                dot.className = 'health-dot running';
+                text.textContent = '服务运行中';
+                text.style.color = 'var(--green)';
+            } else {
+                dot.className = 'health-dot degraded';
+                text.textContent = '服务异常';
+                text.style.color = 'var(--orange)';
+            }
+
+            const fmtSize = (b) => b > 1048576 ? (b/1048576).toFixed(1)+'MB' : b > 1024 ? (b/1024).toFixed(0)+'KB' : b+'B';
+            items.innerHTML = [
+                ['KMS进程', data.kms_process, data.kms_process ? '运行中' : '未运行'],
+                ['端口1688', data.kms_port, data.kms_port ? '监听中' : '未监听'],
+                ['数据库', data.database, data.database ? data.db_records+'条记录' : '连接失败'],
+                ['日志文件', data.log_file, data.log_file ? fmtSize(data.log_size) : '无'],
+                ['运行时长', null, data.uptime],
+            ].map(([label, ok, val]) => {
+                const cls = ok === null ? '' : ok ? 'health-ok' : 'health-fail';
+                const icon = ok === null ? '' : ok ? '✓' : '✗';
+                return `<span class="health-item">${label}: <span class="${cls}">${icon} ${val}</span></span>`;
+            }).join('');
+        }
+
+        async function refreshHealth() {
             try {
                 const data = await api('/api/health');
-                const dot = document.getElementById('health-dot');
-                const text = document.getElementById('health-text');
-                const items = document.getElementById('health-items');
-
-                if (data.status === 'running') {
-                    dot.className = 'health-dot running';
-                    text.textContent = '服务运行中';
-                    text.style.color = 'var(--green)';
-                } else {
-                    dot.className = 'health-dot degraded';
-                    text.textContent = '服务异常';
-                    text.style.color = 'var(--orange)';
-                }
-
-                const fmtSize = (b) => b > 1048576 ? (b/1048576).toFixed(1)+'MB' : b > 1024 ? (b/1024).toFixed(0)+'KB' : b+'B';
-                items.innerHTML = [
-                    ['KMS进程', data.kms_process, data.kms_process ? '运行中' : '未运行'],
-                    ['端口1688', data.kms_port, data.kms_port ? '监听中' : '未监听'],
-                    ['数据库', data.database, data.database ? data.db_records+'条记录' : '连接失败'],
-                    ['日志文件', data.log_file, data.log_file ? fmtSize(data.log_size) : '无'],
-                    ['运行时长', null, data.uptime],
-                ].map(([label, ok, val]) => {
-                    const cls = ok === null ? '' : ok ? 'health-ok' : 'health-fail';
-                    const icon = ok === null ? '' : ok ? '✓' : '✗';
-                    return `<span class="health-item">${label}: <span class="${cls}">${icon} ${val}</span></span>`;
-                }).join('');
+                renderHealth(data);
             } catch(e) { if (e.message !== 'auth') console.error(e); }
         }
 
         checkSession();
-        setInterval(() => { if (document.getElementById('main-content').style.display !== 'none') { loadStats(); loadHealth(); } }, 15000);
+        setInterval(() => { if (document.getElementById('main-content').style.display !== 'none') { loadStats(); refreshHealth(); } }, 15000);
     </script>
 </body>
 </html>

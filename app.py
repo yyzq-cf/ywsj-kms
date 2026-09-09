@@ -391,8 +391,12 @@ def api_logout():
 
 @app.route('/api/check')
 def api_check():
-    """Check if session is valid."""
-    return jsonify({'logged_in': bool(session.get('user'))})
+    """Check if session is valid. Include health data to save a round trip."""
+    logged_in = bool(session.get('user'))
+    resp = {'logged_in': logged_in}
+    if logged_in:
+        resp['health'] = check_kms_health()
+    return jsonify(resp)
 
 
 def check_kms_health():
