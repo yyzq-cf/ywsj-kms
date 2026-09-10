@@ -90,8 +90,15 @@
             <input type="text" id="login-user" placeholder="用户名" autocomplete="username">
             <input type="password" id="login-pass" placeholder="密码" autocomplete="current-password">
             <button id="login-btn" onclick="doLogin()">登录</button>
-
-        </div>
+            <a href="https://github.com/yyzq-cf/ywsj-kms" target="_blank" style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:12px;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text-dim);font-size:13px;text-decoration:none;transition:color 0.2s;">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                GitHub
+            </a>
+            <div id="twofa-section" style="display:none">
+                <input type="text" id="twofa-code" placeholder="6位验证码" maxlength="6" autocomplete="one-time-code" style="text-align:center;letter-spacing:4px;font-size:18px">
+                <button id="twofa-btn" onclick="doVerify2FA()">验证</button>
+                <a href="#" onclick="cancel2FA();return false" style="display:block;text-align:center;margin-top:8px;color:var(--text-dim);font-size:12px;text-decoration:none;">返回登录</a>
+            </div>        </div>
     </div>
 
     <main class="container" id="main-content" style="display:none">
@@ -132,6 +139,67 @@
     </footer>
 
     <script>
+        // ── XSS prevention: HTML escape function ──
+        function esc(s) {
+            if (s == null) return '';
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+        }
+
+        // ── CSRF token management ──
+        let csrfToken = '';
+
+        // ── 2FA login flow ──
+        let pending2FA = null;
+        function show2FASection(token) {
+            pending2FA = token;
+            document.getElementById('login-user').style.display = 'none';
+            document.getElementById('login-pass').style.display = 'none';
+            document.getElementById('login-btn').style.display = 'none';
+            document.getElementById('twofa-section').style.display = 'block';
+            document.getElementById('twofa-code').focus();
+        }
+        function cancel2FA() {
+            pending2FA = null;
+            document.getElementById('login-user').style.display = '';
+            document.getElementById('login-pass').style.display = '';
+            document.getElementById('login-btn').style.display = '';
+            document.getElementById('twofa-section').style.display = 'none';
+            document.getElementById('twofa-code').value = '';
+            document.getElementById('login-btn').disabled = false;
+            document.getElementById('login-btn').textContent = '登录';
+        }
+        async function doVerify2FA() {
+            const code = document.getElementById('twofa-code').value.trim();
+            const errEl = document.getElementById('login-error');
+            const btn = document.getElementById('twofa-btn');
+            if (!code) { errEl.textContent = '请输入验证码'; errEl.style.display = 'block'; return; }
+            errEl.style.display = 'none';
+            btn.disabled = true; btn.textContent = '验证中...';
+            try {
+                const resp = await fetch('/api/login/verify-2fa', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ pending_token: pending2FA, code: code })
+                });
+                const data = await resp.json();
+                if (resp.ok && data.ok) {
+                    if (data.csrf_token) csrfToken = data.csrf_token;
+                    cancel2FA();
+                    afterLogin();
+                } else {
+                    errEl.textContent = data.msg || '验证码错误';
+                    errEl.style.display = 'block';
+                    btn.disabled = false; btn.textContent = '验证';
+                    document.getElementById('twofa-code').value = '';
+                    document.getElementById('twofa-code').focus();
+                }
+            } catch {
+                errEl.textContent = '网络错误';
+                errEl.style.display = 'block';
+                btn.disabled = false; btn.textContent = '验证';
+            }
+        }
+
+
         const themeBtn = document.getElementById('theme-toggle');
         if (localStorage.getItem('kms-theme') === 'light') { document.documentElement.setAttribute('data-theme','light'); themeBtn.textContent = '☀️'; }
         themeBtn.onclick = () => {
@@ -147,12 +215,13 @@
         }
 
         function showLogin() { document.getElementById('login-overlay').style.display = 'flex'; document.getElementById('main-content').style.display = 'none'; document.getElementById('nav-logout').style.display = 'none'; }
+        function afterLogin() { hideLogin(); loadLogs(1); }
         function hideLogin() { document.getElementById('login-overlay').style.display = 'none'; document.getElementById('main-content').style.display = 'block'; document.getElementById('nav-logout').style.display = 'inline'; document.getElementById('nav-user').textContent = '👤 admin'; }
 
         async function checkSession() {
             try {
                 const data = await fetch('/api/check').then(r => r.json());
-                if (data.logged_in) { hideLogin(); loadLogs(1); } else { showLogin(); }
+                if (data.logged_in) { if (data.csrf_token) csrfToken = data.csrf_token; hideLogin(); loadLogs(1); } else { showLogin(); }
             } catch { showLogin(); }
         }
 
@@ -167,7 +236,8 @@
             try {
                 const resp = await fetch('/api/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({username: u, password: p}) });
                 const data = await resp.json();
-                if (resp.ok && data.ok) { hideLogin(); loadLogs(1); }
+                if (resp.ok && data.ok) { if (data.csrf_token) csrfToken = data.csrf_token; hideLogin(); loadLogs(1); }
+                else if (data.requires_2fa) { show2FASection(data.pending_token); }
                 else if (resp.status === 429) { warnEl.textContent = data.msg || 'IP已封禁'; warnEl.style.display = 'block'; btn.disabled = true; btn.textContent = '已封禁'; startCountdown(data.wait||300); }
                 else { errEl.textContent = data.msg || '错误'; errEl.style.display = 'block'; btn.disabled = false; btn.textContent = '登录'; }
             } catch { errEl.textContent = '网络错误'; errEl.style.display = 'block'; btn.disabled = false; btn.textContent = '登录'; }
@@ -182,6 +252,7 @@
 
         async function doLogout() { await fetch('/api/logout', {method:'POST'}); showLogin(); }
         document.getElementById('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+        document.getElementById('twofa-code').addEventListener('keydown', e => { if (e.key === 'Enter') doVerify2FA(); });
 
         function badge(name) { const cls = name && name.includes('Windows') ? 'windows' : name && name.includes('Office') ? 'office' : 'unknown'; return `<span class="badge badge-${cls}">${name || 'Unknown'}</span>`; }
         function statusBadge(s) { if (s === 'Licensed') return `<span class="badge badge-active">已授权</span>`; if (s && s.includes('grace')) return `<span class="badge badge-grace">${s}</span>`; return `<span class="badge badge-unknown">${s || '未知'}</span>`; }
@@ -197,7 +268,7 @@
                 const data = await api(`/api/logs?page=${page}&search=${encodeURIComponent(search)}&app=${encodeURIComponent(appF)}`);
                 allLogs = data.logs;
                 el.innerHTML = data.logs.length === 0 ? '<tr><td colspan="7" class="empty">无记录</td></tr>' :
-                    data.logs.map(l => `<tr><td>${fmtTime(l.timestamp)}</td><td>${l.client_ip||'-'}</td><td>${l.workstation_name||'-'}</td><td>${badge(l.application_name)}</td><td>${l.kms_id_name||'-'}</td><td>${statusBadge(l.license_status)}</td><td><a href="#" onclick="showDetail(${l.id});return false" style="color:var(--accent)">详情</a></td></tr>`).join('');
+                    data.logs.map(l => `<tr><td>${fmtTime(l.timestamp)}</td><td>${esc(l.client_ip)||'-'}</td><td>${esc(l.workstation_name)||'-'}</td><td>${badge(l.application_name)}</td><td>${esc(l.kms_id_name)||'-'}</td><td>${statusBadge(l.license_status)}</td><td><a href="#" onclick="showDetail(${l.id});return false" style="color:var(--accent)">详情</a></td></tr>`).join('');
                 const pg = document.getElementById('pagination');
                 let h = '';
                 if (page > 1) h += `<button onclick="loadLogs(${page-1})">上一页</button>`;
@@ -211,7 +282,7 @@
         function showDetail(id) {
             const log = allLogs.find(l => l.id === id);
             if (!log) return;
-            const fields = [['时间',log.timestamp],['IP地址',log.client_ip],['端口',log.client_port],['协议版本',log.protocol_version],['工作站名',log.workstation_name],['客户端机器ID',log.client_machine_id],['应用类型',log.application_name],['KMS产品',log.kms_id_name],['SKU ID',log.sku_id],['KMS ID',log.kms_id],['许可状态',log.license_status],['剩余时间',log.remaining_time_minutes?log.remaining_time_minutes+'分钟':'-'],['虚拟机',log.is_virtual_machine],['最小客户端数',log.n_count_policy],['ePID',log.response_epid],['当前客户端数',log.active_clients],['续期间隔',log.renewal_interval?log.renewal_interval+'分钟':'-'],['激活间隔',log.activation_interval?log.activation_interval+'分钟':'-'],['请求时间(UTC)',log.request_timestamp_utc]];
+            const fields = [['时间',esc(log.timestamp)],['IP地址',esc(log.client_ip)],['端口',esc(log.client_port)],['协议版本',esc(log.protocol_version)],['工作站名',esc(log.workstation_name)],['客户端机器ID',esc(log.client_machine_id)],['应用类型',esc(log.application_name)],['KMS产品',esc(log.kms_id_name)],['SKU ID',esc(log.sku_id)],['KMS ID',esc(log.kms_id)],['许可状态',esc(log.license_status)],['剩余时间',log.remaining_time_minutes?log.remaining_time_minutes+'分钟':'-'],['虚拟机',esc(log.is_virtual_machine)],['最小客户端数',log.n_count_policy],['ePID',esc(log.response_epid)],['当前客户端数',log.active_clients],['续期间隔',log.renewal_interval?log.renewal_interval+'分钟':'-'],['激活间隔',log.activation_interval?log.activation_interval+'分钟':'-'],['请求时间(UTC)',esc(log.request_timestamp_utc)]];
             document.getElementById('detail-grid').innerHTML = fields.map(([k,v]) => `<div class="detail-item"><span class="detail-label">${k}</span><span>${v||'-'}</span></div>`).join('');
             document.getElementById('raw-log').textContent = log.raw_log || '';
             document.getElementById('detail-modal').style.display = 'flex';

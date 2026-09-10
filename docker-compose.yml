@@ -5,10 +5,17 @@ services:
     restart: always
     ports:
       - "1688:1688"     # KMS服务端口
-      - "8080:8080"     # Web监控面板端口
+      - "8090:8080"     # Web监控面板端口 (外部8090 → 容器8080)
     volumes:
-      - ./data:/data    # 数据持久化(激活日志数据库)
+      - ./data:/data    # 数据持久化(激活日志数据库 + secret_key)
     environment:
       - TZ=Asia/Shanghai
-      - ADMIN_USER=admin       # Web面板用户名
-      - ADMIN_PASS=kms123456   # Web面板密码(首次启动后建议修改)
+      - ADMIN_USER=${ADMIN_USER:-admin}       # Web面板用户名
+      - ADMIN_PASS=${ADMIN_PASS:-kms123456}   # 仅首次启动创建账号用，后从.env读取
+      - TRUSTED_PROXY_HOPS=0                   # 直连无反代=0，有nginx=1
+      - API_RATE_LIMIT=60                      # 每分钟API请求限制
+    security_opt:
+      - no-new-privileges:true
+    read_only: false  # /data需要写，不能用read_only
+    tmpfs:
+      - /tmp

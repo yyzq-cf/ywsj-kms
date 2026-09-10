@@ -9,10 +9,12 @@ import threading
 import time
 import hashlib
 import secrets
+import json
 from datetime import datetime, timezone
 from functools import wraps
-from flask import Flask, render_template, jsonify, request, session
+from flask import Flask, render_template, jsonify, request, session, g
 from werkzeug.security import generate_password_hash, check_password_hash
+import pyotp
 
 DB_PATH = os.environ.get("KMS_DB_PATH", "/data/kms.db")
 LOG_PATH = os.environ.get("KMS_LOG_PATH", "/data/kms.log")
@@ -20,59 +22,173 @@ KMS_PORT = os.environ.get("KMS_PORT", "1688")
 WEB_PORT = os.environ.get("WEB_PORT", "8080")
 ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
 ADMIN_PASS = os.environ.get("ADMIN_PASS", "kms123456")
-SK = os.environ.get("KMS_SECRET_KEY") or secrets.token_hex(32)
+SECRET_KEY_FILE = os.environ.get("KMS_SECRET_KEY_FILE", "/data/secret_key.txt")
+
+# ── Trusted proxy hop count ──
+# When behind nginx, X-Forwarded-For has: client, proxy1, proxy2...
+# We take the Nth-from-right entry (0 = rightmost = closest proxy).
+# Set TRUSTED_PROXY_HOPS=1 if behind a single nginx, 0 for direct exposure.
+TRUSTED_PROXY_HOPS = int(os.environ.get("TRUSTED_PROXY_HOPS", "0"))
+
+
+def _load_secret_key():
+    """Load or generate a persistent secret key."""
+    env_key = os.environ.get("KMS_SECRET_KEY")
+    if env_key:
+        return env_key
+    try:
+        if os.path.exists(SECRET_KEY_FILE):
+            with open(SECRET_KEY_FILE, 'r') as f:
+                key = f.read().strip()
+                if key:
+                    return key
+        key = secrets.token_hex(32)
+        os.makedirs(os.path.dirname(SECRET_KEY_FILE) or '.', exist_ok=True)
+        with open(SECRET_KEY_FILE, 'w') as f:
+            f.write(key)
+        os.chmod(SECRET_KEY_FILE, 0o600)
+        return key
+    except Exception:
+        return secrets.token_hex(32)
+
 
 app = Flask(__name__)
-app.secret_key = SK
-app.permanent_session_lifetime = 3600  # 1 hour session
+app.secret_key = _load_secret_key()
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "0") == "1",
+    PERMANENT_SESSION_LIFETIME=24*3600,  # 24 hours
+    MAX_CONTENT_LENGTH=2 * 1024,  # 2KB limit for JSON POST bodies
+)
+
 
 # ── Brute-force protection ──
 MAX_ATTEMPTS = 5
 LOCKOUT_MINUTES = 5
 _login_attempts = {}  # {ip: {"count": N, "first": ts, "locked_until": ts}}
+_login_lock = threading.Lock()
 
 
 def get_client_ip():
-    return request.environ.get("HTTP_X_FORWARDED_FOR", request.remote_addr or "unknown")
+    """Get the real client IP, respecting trusted proxy chain.
+
+    If TRUSTED_PROXY_HOPS=0 (direct), always use remote_addr — never trust XFF.
+    If TRUSTED_PROXY_HOPS=1 (behind one nginx), take the leftmost XFF entry.
+    """
+    if TRUSTED_PROXY_HOPS > 0:
+        xff = request.headers.get("X-Forwarded-For", "")
+        if xff:
+            parts = [p.strip() for p in xff.split(",")]
+            idx = len(parts) - TRUSTED_PROXY_HOPS
+            if 0 <= idx < len(parts):
+                return parts[idx]
+    return request.remote_addr or "unknown"
 
 
 def check_rate_limit():
     """Check if IP is locked out. Returns (allowed, remaining, wait_seconds)."""
     ip = get_client_ip()
     now = time.time()
-    rec = _login_attempts.get(ip)
-
-    if rec and rec.get("locked_until") and now < rec["locked_until"]:
-        wait = int(rec["locked_until"] - now)
-        return False, 0, wait
-
-    if rec and now - rec.get("first", now) > LOCKOUT_MINUTES * 60:
-        # Reset after window expires
-        _login_attempts.pop(ip, None)
-
-    return True, MAX_ATTEMPTS - (rec["count"] if rec else 0), 0
+    with _login_lock:
+        rec = _login_attempts.get(ip)
+        if rec and rec.get("locked_until") and now < rec["locked_until"]:
+            wait = int(rec["locked_until"] - now)
+            return False, 0, wait
+        if rec and now - rec.get("first", now) > LOCKOUT_MINUTES * 60:
+            _login_attempts.pop(ip, None)
+            rec = None
+        return True, MAX_ATTEMPTS - (rec["count"] if rec else 0), 0
 
 
 def record_failed_attempt():
     """Record a failed login attempt for the client IP."""
     ip = get_client_ip()
     now = time.time()
-    rec = _login_attempts.get(ip, {"count": 0, "first": now})
-
-    rec["count"] += 1
-    rec["first"] = rec.get("first", now)
-
-    if rec["count"] >= MAX_ATTEMPTS:
-        rec["locked_until"] = now + LOCKOUT_MINUTES * 60
-        rec["count"] = 0  # reset count, lock is active
-
-    _login_attempts[ip] = rec
+    with _login_lock:
+        rec = _login_attempts.get(ip, {"count": 0, "first": now})
+        rec["count"] += 1
+        rec["first"] = rec.get("first", now)
+        if rec["count"] >= MAX_ATTEMPTS:
+            rec["locked_until"] = now + LOCKOUT_MINUTES * 60
+            rec["count"] = 0
+        _login_attempts[ip] = rec
 
 
 def clear_attempts():
     """Clear failed attempts on successful login."""
     ip = get_client_ip()
-    _login_attempts.pop(ip, None)
+    with _login_lock:
+        _login_attempts.pop(ip, None)
+
+
+# ── API rate limiting ──
+_api_limits = {}  # {ip: {"count": N, "window_start": ts}}
+_api_lock = threading.Lock()
+API_RATE_LIMIT = int(os.environ.get("API_RATE_LIMIT", "60"))  # per minute
+API_RATE_WINDOW = 60
+
+
+def api_rate_limit():
+    """Rate limit for authenticated API endpoints. Returns True if allowed."""
+    ip = get_client_ip()
+    now = time.time()
+    with _api_lock:
+        rec = _api_limits.get(ip)
+        if not rec or now - rec["window_start"] > API_RATE_WINDOW:
+            _api_limits[ip] = {"count": 1, "window_start": now}
+            return True
+        rec["count"] += 1
+        if rec["count"] > API_RATE_LIMIT:
+            return False
+        return True
+
+
+# ── Security headers ──
+@app.after_request
+def set_security_headers(resp):
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['X-Frame-Options'] = 'DENY'
+    resp.headers['X-XSS-Protection'] = '1; mode=block'
+    resp.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+    resp.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'"
+    )
+    return resp
+
+
+# ── CSRF protection ──
+def generate_csrf_token():
+    """Generate and store a CSRF token in the session."""
+    if '_csrf_token' not in session:
+        session['_csrf_token'] = secrets.token_hex(32)
+    return session['_csrf_token']
+
+
+# Inject CSRF token into all templates
+@app.context_processor
+def inject_csrf_token():
+    return dict(csrf_token=generate_csrf_token)
+
+
+def csrf_protect(f):
+    """CSRF protection decorator for POST endpoints."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.headers.get('X-CSRF-Token') or \
+                (request.form.get('_csrf_token') if request.form else None) or \
+                (request.get_json(silent=True) or {}).get('_csrf_token')
+        expected = session.get('_csrf_token')
+        if not expected or not token or not secrets.compare_digest(token, expected):
+            return jsonify({'ok': False, 'msg': 'CSRF token invalid'}), 403
+        return f(*args, **kwargs)
+    return decorated
 
 
 # ── KMS ID/name mappings ──
@@ -142,14 +258,19 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            totp_secret TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_log_ts ON activation_logs(timestamp);
         CREATE INDEX IF NOT EXISTS idx_log_ip ON activation_logs(client_ip);
         CREATE INDEX IF NOT EXISTS idx_log_ws ON activation_logs(workstation_name);
     """)
+    # ── Migration: add totp_secret column if missing (existing DBs) ──
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(admin_users)").fetchall()]
+    if 'totp_secret' not in cols:
+        conn.execute("ALTER TABLE admin_users ADD COLUMN totp_secret TEXT")
+        print("Migration: added totp_secret column", flush=True)
 
-    # Insert admin user if not exists
     existing = conn.execute(
         "SELECT id FROM admin_users WHERE username=?", (ADMIN_USER,)
     ).fetchone()
@@ -165,8 +286,8 @@ def init_db():
 
 # ── Log parser ──
 class KMSLogParser:
-    RE_CONN_ACCEPT = re.compile(r'IPv4 connection accepted: ([\d.]+):(\d+)\.')
-    RE_CONN_CLOSE = re.compile(r'IPv4 connection closed: ([\d.]+):(\d+)\.')
+    RE_CONN_ACCEPT = re.compile(r'IPv4 connection accepted: ([\d.]+):(\d+).')
+    RE_CONN_CLOSE = re.compile(r'IPv4 connection closed: ([\d.]+):(\d+).')
     RE_PROTO = re.compile(r'Protocol version\s+: ([\d.]+)')
     RE_VM = re.compile(r'Client is a virtual machine\s+: (\w+)')
     RE_LIC = re.compile(r'Licensing status\s+: (\d+) \(([^)]+)\)')
@@ -315,6 +436,8 @@ def login_required(f):
     def decorated(*args, **kwargs):
         if not session.get('user'):
             return jsonify({'ok': False, 'msg': '未登录'}), 401
+        if not api_rate_limit():
+            return jsonify({'ok': False, 'msg': '请求过于频繁'}), 429
         return f(*args, **kwargs)
     return decorated
 
@@ -344,6 +467,12 @@ def settings_page():
     return render_template('settings.html')
 
 
+# ── 2FA pending sessions (in-memory, 3 min expiry) ──
+_2fa_pending = {}  # {token: {"username": str, "expires": ts}}
+_2fa_lock = threading.Lock()
+_2FA_EXPIRY = 180  # 3 minutes
+
+
 @app.route('/api/login', methods=['POST'])
 def api_login():
     ip = get_client_ip()
@@ -361,10 +490,42 @@ def api_login():
     password = data.get('password', '')
 
     if check_auth(username, password):
-        clear_attempts()
-        session.permanent = True
-        session['user'] = username
-        return jsonify({'ok': True})
+        # Check if 2FA is enabled for this user
+        conn = get_db()
+        user_row = conn.execute(
+            "SELECT totp_secret FROM admin_users WHERE username=?", (username,)
+        ).fetchone()
+        conn.close()
+        totp_secret = user_row['totp_secret'] if user_row else None
+
+        if totp_secret:
+            # Password OK but 2FA required — issue a pending token
+            pending_token = secrets.token_hex(32)
+            with _2fa_lock:
+                # Clean expired
+                now = time.time()
+                for k in list(_2fa_pending):
+                    if _2fa_pending[k]['expires'] < now:
+                        del _2fa_pending[k]
+                _2fa_pending[pending_token] = {
+                    'username': username,
+                    'expires': now + _2FA_EXPIRY
+                }
+            clear_attempts()
+            return jsonify({
+                'ok': False,
+                'requires_2fa': True,
+                'pending_token': pending_token,
+                'msg': '请输入两步验证码'
+            })
+        else:
+            # No 2FA — login directly
+            clear_attempts()
+            session.clear()  # Clear any old session data
+            session.permanent = True
+            session['user'] = username
+            csrf = generate_csrf_token()
+            return jsonify({'ok': True, 'csrf_token': csrf})
 
     record_failed_attempt()
     _, remaining2, _ = check_rate_limit()
@@ -383,6 +544,68 @@ def api_login():
     }), 401
 
 
+# ── 2FA attempt tracking (per pending_token) ──
+_2FA_MAX_ATTEMPTS = 5
+
+
+@app.route('/api/login/verify-2fa', methods=['POST'])
+def api_verify_2fa():
+    data = request.get_json() or {}
+    pending_token = data.get('pending_token', '')
+    code_str = data.get('code', '').strip()
+
+    if not pending_token or not code_str:
+        return jsonify({'ok': False, 'msg': '请填写验证码'}), 400
+
+    # Validate pending token (peek, don't pop yet)
+    with _2fa_lock:
+        now = time.time()
+        # Clean expired
+        for k in list(_2fa_pending):
+            if _2fa_pending[k]['expires'] < now:
+                del _2fa_pending[k]
+        pending = _2fa_pending.get(pending_token)
+
+    if not pending:
+        return jsonify({'ok': False, 'msg': '验证已超时，请重新登录'}), 403
+
+    # Check attempt count
+    attempts = pending.get('attempts', 0)
+    if attempts >= _2FA_MAX_ATTEMPTS:
+        with _2fa_lock:
+            _2fa_pending.pop(pending_token, None)
+        return jsonify({'ok': False, 'msg': f'验证码错误次数过多，请重新登录'}), 403
+
+    username = pending['username']
+    conn = get_db()
+    user_row = conn.execute(
+        "SELECT totp_secret FROM admin_users WHERE username=?", (username,)
+    ).fetchone()
+    conn.close()
+
+    if not user_row or not user_row['totp_secret']:
+        return jsonify({'ok': False, 'msg': '2FA未启用'}), 400
+
+    totp = pyotp.TOTP(user_row['totp_secret'])
+    if not totp.verify(code_str, valid_window=1):
+        # Increment attempt count
+        with _2fa_lock:
+            pending['attempts'] = attempts + 1
+            _2fa_pending[pending_token] = pending
+        remaining = _2FA_MAX_ATTEMPTS - pending['attempts']
+        return jsonify({'ok': False, 'msg': f'验证码错误，剩余尝试次数: {remaining}'}), 401
+
+    # 2FA verified — pop token and complete login
+    with _2fa_lock:
+        _2fa_pending.pop(pending_token, None)
+
+    session.clear()  # Clear any old session data
+    session.permanent = True
+    session['user'] = username
+    csrf = generate_csrf_token()
+    return jsonify({'ok': True, 'csrf_token': csrf})
+
+
 @app.route('/api/logout', methods=['POST'])
 def api_logout():
     session.clear()
@@ -396,6 +619,7 @@ def api_check():
     resp = {'logged_in': logged_in}
     if logged_in:
         resp['health'] = check_kms_health()
+        resp['csrf_token'] = generate_csrf_token()
     return jsonify(resp)
 
 
@@ -411,30 +635,26 @@ def check_kms_health():
         'db_records': 0,
     }
 
-    # 1. Check vlmcsd process
     try:
         result = subprocess.run(['pgrep', '-x', 'vlmcsd'], capture_output=True, timeout=3)
         health['kms_process'] = result.returncode == 0
     except Exception:
         health['kms_process'] = False
 
-    # 2. Check port 1688 via /proc/net/tcp (no actual connection to avoid log noise)
     try:
-        # Port 1688 = 0x690 in hex
         target_port = format(1688, '04X')
         with open('/proc/net/tcp') as tf:
             for line in tf:
                 parts = line.split()
                 if len(parts) >= 4:
-                    local = parts[1]  # 00000000:0690
-                    state = parts[3]  # 0A = LISTEN
+                    local = parts[1]
+                    state = parts[3]
                     if local.endswith(f':{target_port}') and state == '0A':
                         health['kms_port'] = True
                         break
     except Exception:
         health['kms_port'] = False
 
-    # 3. Check database
     try:
         conn = get_db()
         health['database'] = True
@@ -445,7 +665,6 @@ def check_kms_health():
     except Exception:
         health['database'] = False
 
-    # 4. Check log file
     try:
         if os.path.exists(LOG_PATH):
             health['log_file'] = True
@@ -453,22 +672,18 @@ def check_kms_health():
     except Exception:
         pass
 
-    # 5. Calculate uptime from vlmcsd process
     try:
         pid_result = subprocess.run(
             ['pgrep', '-x', 'vlmcsd'], capture_output=True, timeout=3, text=True
         )
         if pid_result.returncode == 0:
             pid = pid_result.stdout.strip().split('\n')[0]
-            # Read /proc/<pid>/stat for start time (field 22 = starttime in clock ticks)
             with open(f'/proc/{pid}/stat') as sf:
                 stat_parts = sf.read().split()
                 starttime_ticks = int(stat_parts[21])
-            # Get system clock tick rate and boot time
             ticks_per_sec = os.sysconf(os.sysconf_names['SC_CLK_TCK'])
             with open('/proc/uptime') as uf:
                 system_uptime = float(uf.read().split()[0])
-            # Process uptime = system_uptime - (starttime_ticks / ticks_per_sec)
             proc_start = starttime_ticks / ticks_per_sec
             proc_uptime = int(system_uptime - proc_start)
             days = proc_uptime // 86400
@@ -483,7 +698,6 @@ def check_kms_health():
     except Exception:
         pass
 
-    # Overall status
     health['status'] = 'running' if (
         health['kms_process'] and health['kms_port'] and health['database']
     ) else 'degraded'
@@ -553,8 +767,14 @@ def api_stats():
 @app.route('/api/logs')
 @login_required
 def api_logs():
-    page = int(request.args.get('page', 1))
-    per_page = min(int(request.args.get('per_page', 20)), 100)
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+    except (ValueError, TypeError):
+        page = 1
+    try:
+        per_page = min(max(1, int(request.args.get('per_page', 20))), 100)
+    except (ValueError, TypeError):
+        per_page = 20
     search = request.args.get('search', '').strip()
     app_filter = request.args.get('app', '').strip()
 
@@ -603,6 +823,7 @@ def api_account():
 
 @app.route('/api/change-password', methods=['POST'])
 @login_required
+@csrf_protect
 def api_change_password():
     """Change password. Requires current password verification."""
     data = request.get_json() or {}
@@ -632,6 +853,7 @@ def api_change_password():
 
 @app.route('/api/change-username', methods=['POST'])
 @login_required
+@csrf_protect
 def api_change_username():
     """Change username. Requires current password verification."""
     data = request.get_json() or {}
@@ -649,7 +871,6 @@ def api_change_username():
         return jsonify({'ok': False, 'msg': '当前密码错误'}), 403
 
     conn = get_db()
-    # Check if new username already taken
     existing = conn.execute(
         "SELECT id FROM admin_users WHERE username=? AND username!=?",
         (new_user, username)
@@ -665,15 +886,126 @@ def api_change_username():
     conn.commit()
     conn.close()
 
-    # Update session
     session['user'] = new_user
     return jsonify({'ok': True, 'msg': '用户名修改成功', 'username': new_user})
 
 
+
+
+# ── 2FA management ──
+@app.route('/api/2fa/status')
+@login_required
+def api_2fa_status():
+    """Check if 2FA is enabled for current user."""
+    username = session.get('user')
+    conn = get_db()
+    row = conn.execute(
+        "SELECT totp_secret FROM admin_users WHERE username=?", (username,)
+    ).fetchone()
+    conn.close()
+    return jsonify({'enabled': bool(row and row['totp_secret'])})
+
+
+@app.route('/api/2fa/setup', methods=['POST'])
+@login_required
+@csrf_protect
+def api_2fa_setup():
+    """Generate a new TOTP secret and return otpauth URI."""
+    username = session.get('user')
+    # Generate new secret
+    secret = pyotp.random_base32()
+    totp = pyotp.TOTP(secret)
+    uri = totp.provisioning_uri(name=username, issuer_name="ywsj-kms")
+    # Store in session temporarily (not saved to DB until verified)
+    session['_pending_totp_secret'] = secret
+    return jsonify({'secret': secret, 'uri': uri})
+
+
+@app.route('/api/2fa/confirm', methods=['POST'])
+@login_required
+@csrf_protect
+def api_2fa_confirm():
+    """Verify the TOTP code and save the secret to DB."""
+    data = request.get_json() or {}
+    code_str = data.get('code', '').strip()
+    secret = session.get('_pending_totp_secret')
+
+    if not secret or not code_str:
+        return jsonify({'ok': False, 'msg': '请先获取二维码并输入验证码'}), 400
+
+    totp = pyotp.TOTP(secret)
+    if not totp.verify(code_str, valid_window=1):
+        return jsonify({'ok': False, 'msg': '验证码错误，请重试'}), 401
+
+    # Save to DB
+    username = session.get('user')
+    conn = get_db()
+    conn.execute(
+        "UPDATE admin_users SET totp_secret=? WHERE username=?",
+        (secret, username)
+    )
+    conn.commit()
+    conn.close()
+
+    # Clear pending secret
+    session.pop('_pending_totp_secret', None)
+    return jsonify({'ok': True, 'msg': '两步验证已启用'})
+
+
+@app.route('/api/2fa/disable', methods=['POST'])
+@login_required
+@csrf_protect
+def api_2fa_disable():
+    """Disable 2FA. Requires current password verification."""
+    data = request.get_json() or {}
+    current_pass = data.get('current_password', '')
+
+    if not current_pass:
+        return jsonify({'ok': False, 'msg': '请输入当前密码'}), 400
+
+    username = session.get('user')
+    if not check_auth(username, current_pass):
+        return jsonify({'ok': False, 'msg': '当前密码错误'}), 403
+
+    conn = get_db()
+    conn.execute(
+        "UPDATE admin_users SET totp_secret=NULL WHERE username=?",
+        (username,)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True, 'msg': '两步验证已关闭'})
+
+
+# ── Background task startup (auto-starts on import for gunicorn) ──
+_bg_started = False
+_bg_lock = threading.Lock()
+
+
+def _start_background_tasks():
+    """init_db + log watcher thread. Idempotent — safe to call multiple times."""
+    global _bg_started
+    with _bg_lock:
+        if _bg_started:
+            return
+        _bg_started = True
+        try:
+            init_db()
+            t = threading.Thread(target=follow_log, daemon=True)
+            t.start()
+            print("Log watcher started", flush=True)
+        except Exception as e:
+            print(f"Failed to start background tasks: {e}", flush=True)
+
+
+# Auto-start when imported by gunicorn
+_start_background_tasks()
+
+
+# ── Dev mode entrypoint ──
+# Under gunicorn, __main__ is never executed — background tasks
+# start via _start_background_tasks() above. In dev mode (python app.py),
+# we also start vlmcsd here:
 if __name__ == '__main__':
-    init_db()
     start_kms_server()
-    t = threading.Thread(target=follow_log, daemon=True)
-    t.start()
-    print("Log watcher started", flush=True)
     app.run(host='0.0.0.0', port=int(WEB_PORT), debug=False)
