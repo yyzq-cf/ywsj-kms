@@ -15,6 +15,9 @@ from functools import wraps
 from flask import Flask, render_template, jsonify, request, session, g
 from werkzeug.security import generate_password_hash, check_password_hash
 import pyotp
+import qrcode
+import io
+import base64 as b64mod
 
 DB_PATH = os.environ.get("KMS_DB_PATH", "/data/kms.db")
 LOG_PATH = os.environ.get("KMS_LOG_PATH", "/data/kms.log")
@@ -910,15 +913,24 @@ def api_2fa_status():
 @login_required
 @csrf_protect
 def api_2fa_setup():
-    """Generate a new TOTP secret and return otpauth URI."""
+    """Generate a new TOTP secret and return QR code as data URI."""
     username = session.get('user')
     # Generate new secret
     secret = pyotp.random_base32()
     totp = pyotp.TOTP(secret)
     uri = totp.provisioning_uri(name=username, issuer_name="ywsj-kms")
+    # Generate QR code locally (no external dependency)
+    qr = qrcode.QRCode(version=1, box_size=8, border=2,
+                       error_correction=qrcode.constants.ERROR_CORRECT_M)
+    qr.add_data(uri)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    qr_data_uri = 'data:image/png;base64,' + b64mod.b64encode(buf.getvalue()).decode()
     # Store in session temporarily (not saved to DB until verified)
     session['_pending_totp_secret'] = secret
-    return jsonify({'secret': secret, 'uri': uri})
+    return jsonify({'secret': secret, 'qr_data_uri': qr_data_uri})
 
 
 @app.route('/api/2fa/confirm', methods=['POST'])

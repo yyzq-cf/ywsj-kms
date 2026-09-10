@@ -379,9 +379,7 @@
                     document.getElementById('twofa-setup-btn').style.display = 'none';
                     document.getElementById('twofa-enable-area').style.display = 'block';
                     document.getElementById('twofa-secret').value = data.secret;
-                    // Generate QR code via Google Charts API (no external dependency)
-                    const qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(data.uri);
-                    document.getElementById('twofa-qrcode').innerHTML = '<img src="' + qrUrl + '" width="200" height="200" alt="2FA QR Code" style="border-radius:8px">';
+                    document.getElementById('twofa-qrcode').innerHTML = '<img src="' + data.qr_data_uri + '" width="200" height="200" alt="2FA QR Code" style="border-radius:8px">';
                 }
             } catch { showMsg2FA('twofa-err', '网络错误', false); }
         }
