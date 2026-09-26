@@ -238,6 +238,12 @@ ywsj-kms/
 源码：https://github.com/yyzq-cf/ywsj-kms  
 Docker Hub：https://hub.docker.com/r/ywsj/ywsj-kms
 
+## ☕ 请作者喝杯咖啡
+
+如果这个项目对你有帮助，欢迎请作者喝杯咖啡 ☕️
+
+![打赏码](assets/donation.jpg)
+
 ## 🙏 致谢
 
 - [**vlmcsd**](https://github.com/Wind4/vlmcsd) — 核心KMS服务组件
