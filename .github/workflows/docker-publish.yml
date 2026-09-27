@@ -2,7 +2,8 @@ name: Build and Push Docker Image
 
 on:
   push:
-    branches: [main]
+    tags:
+      - 'v*'
     paths:
       - 'Dockerfile'
       - 'docker-compose.yml'
@@ -31,6 +32,10 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Extract version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -39,3 +44,6 @@ jobs:
           push: true
           tags: |
             ywsj/ywsj-kms:latest
+            ywsj/ywsj-kms:${{ steps.version.outputs.VERSION }}
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.VERSION }}

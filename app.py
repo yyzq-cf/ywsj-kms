@@ -13,6 +13,9 @@ import json
 from datetime import datetime, timezone
 from functools import wraps
 from flask import Flask, render_template, jsonify, request, session, g
+
+# 版本号（CI 构建时通过 build-arg 注入，本地开发为 dev）
+APP_VERSION = os.environ.get("APP_VERSION", "dev")
 from werkzeug.security import generate_password_hash, check_password_hash
 import pyotp
 import qrcode
@@ -175,6 +178,10 @@ def generate_csrf_token():
 
 
 # Inject CSRF token into all templates
+@app.context_processor
+def inject_version():
+    return {"APP_VERSION": APP_VERSION}
+
 @app.context_processor
 def inject_csrf_token():
     return dict(csrf_token=generate_csrf_token)
