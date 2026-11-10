@@ -11,10 +11,12 @@ APPUID=1000
 
 # Ensure data directory exists and is owned by appuser
 mkdir -p "$DATA_DIR"
-chown -R "$APPUID:$APPUID" "$DATA_DIR" 2>/dev/null || true
 
 # Initialize database (creates tables + admin user if needed)
 python3 -c "from app import init_db; init_db()"
+
+#Make data directory owner is appuser
+chown -R "$APPUID:$APPUID" "$DATA_DIR" 2>/dev/null || true
 
 # Start vlmcsd as appuser (it needs to bind port 1688 — privileged on host network)
 # In container with bridge network, port 1688 binding doesn't need root.
